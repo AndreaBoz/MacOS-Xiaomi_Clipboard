@@ -1,0 +1,123 @@
+#!/bin/bash
+set -euo pipefail
+umask 077
+LABEL="it.andrea.xiaomi-clipboard"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+SUPPORT="$HOME/Library/Application Support/XiaomiClipboard"
+APP="$SUPPORT/Xiaomi Clipboard.app"
+BINARY="$APP/Contents/MacOS/xiaomi-clipboard"
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+DOMAIN="gui/$(id -u)"
+SERVICE="$DOMAIN/$LABEL"
+
+require_install() {
+    if [[ ! -x "$BINARY" || ! -f "$PLIST" ]]; then
+        echo "Prima esegui: ./clipboardctl install" >&2
+        exit 1
+    fi
+}
+bootout() {
+    if /bin/launchctl print "$SERVICE" >/dev/null 2>&1; then
+        /bin/launchctl bootout "$SERVICE"
+    fi
+}
+case "${1:-help}" in
+    build)
+        "$ROOT/scripts/swift.sh" build -c release --product xiaomi-clipboard
+        ;;
+    test)
+        "$ROOT/scripts/swift.sh" build -c release --product clipboard-tests
+        exec "$ROOT/.build/release/clipboard-tests"
+        ;;
+    package)
+        "$ROOT/scripts/swift.sh" build -c release --product xiaomi-clipboard
+        "$ROOT/scripts/build-icon.sh"
+        DEVICE_FILE="$ROOT/.local/screenshot-device-id"
+        if [[ ! -s "$DEVICE_FILE" ]]; then
+            echo "Missing device ID. Create .local/screenshot-device-id first (see README)." >&2
+            exit 1
+        fi
+        OUTPUT="$ROOT/dist/Xiaomi Clipboard.app"
+        rm -rf "$OUTPUT"
+        mkdir -p "$OUTPUT/Contents/MacOS" "$OUTPUT/Contents/Resources"
+        /usr/bin/install -m 700 "$ROOT/.build/release/xiaomi-clipboard" "$OUTPUT/Contents/MacOS/xiaomi-clipboard"
+        cp "$ROOT/scripts/Info.plist" "$OUTPUT/Contents/Info.plist"
+        cp "$ROOT/Assets/AppIcon.icns" "$OUTPUT/Contents/Resources/AppIcon.icns"
+        cp "$ROOT/scripts/setup-native-screenshots.py" "$ROOT/scripts/send-screenshots.py" "$OUTPUT/Contents/Resources/"
+        cp "$DEVICE_FILE" "$OUTPUT/Contents/Resources/screenshot-device-id"
+        /usr/bin/codesign --force --sign - "$OUTPUT"
+        /usr/bin/codesign --verify --strict "$OUTPUT"
+        echo "App pronta: $OUTPUT"
+        ;;
+    install)
+        MODE="${2:-plain}"
+        INTERVAL="${3:-0.4}"
+        [[ "$MODE" == preserve || "$MODE" == plain ]] || { echo "Modalità: preserve oppure plain" >&2; exit 1; }
+        "$ROOT/scripts/swift.sh" build -c release --product xiaomi-clipboard
+        "$ROOT/scripts/build-icon.sh"
+        # Generate and validate everything before stopping an existing installation.
+        STAGING="$(mktemp -d "${TMPDIR:-/tmp}/xiaomi-clipboard.XXXXXX")"
+        trap 'rm -rf "$STAGING"' EXIT
+        "$ROOT/.build/release/xiaomi-clipboard" agent-plist "$BINARY" "$MODE" "$INTERVAL" > "$STAGING/agent.plist"
+        /usr/bin/plutil -lint "$STAGING/agent.plist"
+        mkdir -p "$STAGING/Xiaomi Clipboard.app/Contents/MacOS" "$STAGING/Xiaomi Clipboard.app/Contents/Resources"
+        /usr/bin/install -m 700 "$ROOT/.build/release/xiaomi-clipboard" "$STAGING/Xiaomi Clipboard.app/Contents/MacOS/xiaomi-clipboard"
+        cp "$ROOT/scripts/Info.plist" "$STAGING/Xiaomi Clipboard.app/Contents/Info.plist"
+        cp "$ROOT/Assets/AppIcon.icns" "$STAGING/Xiaomi Clipboard.app/Contents/Resources/AppIcon.icns"
+        /usr/bin/codesign --force --sign - "$STAGING/Xiaomi Clipboard.app"
+        /usr/bin/codesign --verify --strict "$STAGING/Xiaomi Clipboard.app"
+        bootout
+        mkdir -p "$SUPPORT" "$HOME/Library/LaunchAgents"
+        # Only this app's dedicated bundle is replaced; unrelated files are untouched.
+        rm -rf "$APP"
+        mv "$STAGING/Xiaomi Clipboard.app" "$APP"
+        /usr/bin/install -m 600 "$STAGING/agent.plist" "$PLIST"
+        /bin/launchctl enable "$SERVICE"
+        /bin/launchctl bootstrap "$DOMAIN" "$PLIST"
+        echo "Installato e avviato: $MODE, intervallo ${INTERVAL}s"
+        ;;
+    start)
+        require_install
+        /bin/launchctl enable "$SERVICE"
+        if ! /bin/launchctl print "$SERVICE" >/dev/null 2>&1; then
+            /bin/launchctl bootstrap "$DOMAIN" "$PLIST"
+        fi
+        /bin/launchctl kickstart "$SERVICE"
+        ;;
+    stop)
+        /bin/launchctl disable "$SERVICE"
+        bootout
+        echo "Arrestato; avvio automatico disabilitato fino a start."
+        ;;
+    restart)
+        require_install
+        "$0" stop
+        "$0" start
+        ;;
+    status)
+        if [[ -f "$PLIST" ]]; then
+            echo "Configurazione di avvio all’accesso presente:"
+            /usr/bin/plutil -p "$PLIST"
+        else
+            echo "Nessuna configurazione di avvio all’accesso."
+        fi
+        /bin/launchctl print "$SERVICE" 2>/dev/null || echo "Sincronizzazione inattiva."
+        ;;
+    inspect)
+        require_install
+        exec "$BINARY" inspect
+        ;;
+    logs)
+        exec /usr/bin/log show --last 1h --style compact --predicate 'subsystem == "it.andrea.xiaomi-clipboard"'
+        ;;
+    uninstall)
+        "$0" stop
+        rm -f "$PLIST"
+        rm -rf "$APP"
+        rmdir "$SUPPORT" 2>/dev/null || true
+        echo "Disinstallato. Sorgenti e build restano nel progetto."
+        ;;
+    *)
+        echo "Uso: ./clipboardctl {build|test|package|install [plain|preserve] [intervallo]|start|stop|restart|status|inspect|logs|uninstall}"
+        ;;
+esac

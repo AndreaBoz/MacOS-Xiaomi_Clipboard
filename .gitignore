@@ -1,0 +1,19 @@
+# macOS metadata
+.DS_Store
+**/.DS_Store
+
+# Swift Package Manager and build products
+.build/
+.swiftpm/
+dist/
+DerivedData/
+
+# Locally packaged app and machine-specific configuration
+/Xiaomi Clipboard.app/
+/.local/
+/Screenshot da inviare/
+
+# Python bytecode and temporary files
+__pycache__/
+*.py[cod]
+*.swp
