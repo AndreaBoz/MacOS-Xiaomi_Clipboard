@@ -1,6 +1,6 @@
-# Xiaomi Clipboard
+# Xiaomi-MacOS Clipboard
 
-Xiaomi Clipboard is a small macOS companion app for a focused study workflow: when a session is enabled, KDE Connect shares copied text with a paired Xiaomi tablet and forwards ordinary macOS screenshots to its gallery. Turning the session off restores the normal desktop screenshot destination and stops the local forwarding service.
+Xiaomi-MacOS Clipboard is a small macOS companion app for a focused study workflow: when a session is enabled, KDE Connect shares copied text with a paired Xiaomi tablet and forwards ordinary macOS screenshots to its gallery. Turning the session off restores the normal desktop screenshot destination and stops the local forwarding service.
 
 The project was created because I needed a single, deliberate switch for moving notes and screenshots from a Mac to a Xiaomi Pad while studying. It does not depend on Xiaomi Interconnectivity; KDE Connect is the transport layer.
 
